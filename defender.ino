@@ -59,8 +59,9 @@ void setup()
         TurnSystemOFF();
         
         // Defining initial password
-        command[0]='1'; command[1]='1'; command[2]='1'; command[3]='1'; command[4]='|';
-        ChangePassword(0);
+        command[0]='1'; command[1]='2'; command[2]='3'; command[3]='4'; command[4]='|';
+        char i = 0;
+        ChangePassword(&i);
 }
 
 void loop()
@@ -91,7 +92,9 @@ void loop()
                                 break;
                         case '2': //GetSystemStatus();
                                 break;
-                        case '3': //ChangePassword();
+                        case '3':
+                                i+=2; 
+                                ChangePassword(&i);
                                 break;
                         case '4': i = NewUser(i+1);
                                 break;
@@ -142,26 +145,32 @@ void GetCommand(char serialSource)
         }
 }
 
-char ChangePassword(char arrayPosition)
+// INPUT: Ponteiro para o idx da senha no command[]
+// OUTPUT: none
+void ChangePassword(char *i)
 {
-        unsigned short i;
+        int address; // Variavel utilizada para caminhar pel
         
-        for (i=0; command[arrayPosition]!='|'; i++) {
-                EEPROM.write(i, command[arrayPosition]);
-                Serial.write("\nEscrevendo "); Serial.write(command[arrayPosition]); Serial.write(" no endereco "); Serial.write((char)(((int)'0')+i));
-                arrayPosition++;
+        for (address=0; command[*i]!='|' && command[*i]!='%'; address++) {
+                EEPROM.write(address, command[*i]);
+                //Serial.write("\nEscrevendo "); Serial.write(command[*i]); Serial.write(" no endereco "); Serial.write((char)(((int)'0')+address));
+                //Serial.write("\nIndice atual e: "); Serial.write((char)(((int)'0')+*i));
+                (*i)++;
         }
+        //Serial.write("\nNa saida do loop o indice atual e: "); Serial.write((char)(((int)'0')+*i));
         
-        if (i!=9) {
-                EEPROM.write(i, '|');
-                Serial.write("\nEscrevendo "); Serial.write(command[arrayPosition]); Serial.write(" no endereco "); Serial.write((char)(((int)'0')+i));
-        }
+        // Escrevendo '|' no ultimo endereço, podendo ser 8 ou anterior
+        EEPROM.write(address, '|');
+        //Serial.write("\nEscrevendo '|' no endereco "); Serial.write((char)(((int)'0')+address));
         
-        Serial.write("\nO conteudo da eeprom:\n");
-        for(int j=0; EEPROM.read(j)!='|'; j++)
-                Serial.write(EEPROM.read(j));
+        //Serial.write("\nO conteudo da eeprom:\n");
+        //for(int j=0; EEPROM.read(j)!='|'; j++)
+                //Serial.write(EEPROM.read(j));
         
-        return arrayPosition+1;
+        // Incrementando indice *i para o proximo comando
+        if(command[*i]=='|')
+                (*i)++;
+        //Serial.write("\nA posicao do comando que esta sendo retornada e: "); Serial.write((char)(((int)'0')+*i));
 }
 
 char CommandIsValid(void)
@@ -192,7 +201,7 @@ char PasswordIsValid(char *i)
         if(verified && (command[*i] != EEPROM.read(*i)) && (*i)!=10)
                 verified = 0;
         
-        *i++;
+        (*i)++;
         Serial.write("\nO retorno da funcao no endereco "); Serial.write((char)(((int)'0')+*i)); Serial.write(" sera "); Serial.write((char)(((int)'0')+verified));
         return verified;
 }
@@ -200,14 +209,14 @@ char PasswordIsValid(char *i)
 void TurnSystemON(void)
 {
         systemStatus = ON;
-        Serial.write("System is turning on");
+        Serial.write("\nSystem is turning on");
 }
 
 void TurnSystemOFF(void)
 {
         systemStatus = OFF;
         digitalWrite(BUZZER_ALARM, LOW);
-        Serial.write("System is turning off");
+        Serial.write("\nSystem is turning off");
 }
 
 char NewUser(char arrayPosition)
