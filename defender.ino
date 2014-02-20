@@ -8,6 +8,9 @@
 //        2 - Solicita status do sistema
 //        3 - Troca de senha
 //        4 - Adicionar novo usuário (telefone 13 digitos)
+// OBS2: EEPROM Codes
+//         - A senha sempre começa no endereço 0 da flash
+
 
 
 // 1. Pre-processor Directives Section
@@ -31,18 +34,18 @@ char command[COMMAND_SIZE];
 SoftwareSerial gps = SoftwareSerial(4, 5); // RX, TX
 
 // FUNCTION PROTOTYPES
-char VerifyPassword(void);
+char VerifyPassword(char *i);
 void TurnSystemON(void);
 void TurnSystemOFF(void);
 void GetSystemStatus(void);
-char ChangePassword(char arrayPosition); // Usuario envia no comando antiga senha e nova senha
+char ChangePassword(char arrayPosition);
 char NewUser(char arrayPosition);
 void GetCommand(char serialSource);
 
 
 // 3. Subroutines Section
 void setup()
-{
+{       
         // Defining data inputs
         pinMode(PIR_SENSOR, INPUT);
         pinMode(TILT_SENSOR, INPUT);
@@ -53,13 +56,17 @@ void setup()
         //Initializing global variables/serial communication
         Serial.begin(115200);
         TurnSystemOFF();
-        command[0]='%';
+        
+        // Defining initial password
+        command[0]='1'; command[1]='1'; command[2]='1'; command[3]='1'; command[4]='|';
+        ChangePassword(0);
 }
 
 void loop()
 { 
         char i = 0; // Reset array position
-            
+        command[i] = '%'; // Clear command buffer
+           
         //Teste é feito de acordo com disponibilidade dos meios de comunicação, caso bluetooth esteja disponível, enviamos 0 para a função getCommand
         //caso o GSM esteja disponível, enviamos 1.
         if (Serial.available()) {
@@ -69,8 +76,8 @@ void loop()
         } /*else if (gsm.available()) {
                 GetCommand(1);
         } */
-            
-        //if(VerifyPassword()){
+        
+        if(VerifyPassword(&i)){
                 do {
                         switch (command[i]) {
                         case '0': 
@@ -90,8 +97,7 @@ void loop()
                         default: ;
                         }
                 } while (command[i]!='%');
-        //}
-        command[0] = '%'; // Clear command buffer
+        }
             
         if (systemStatus) {
                 if (digitalRead(PIR_SENSOR) || digitalRead(TILT_SENSOR)) {
@@ -134,24 +140,49 @@ void GetCommand(char serialSource)
                 sms.flush();*/
         }
 }
-/*
-char VerifyPassword(void)
+
+char ChangePassword(char arrayPosition)
 {
-        char i = 0;
+        unsigned short i;
+        
+        for (i=0; command[arrayPosition]!='|'; i++) {
+                EEPROM.write(i, command[arrayPosition]);
+                Serial.write("\nEscrevendo "); Serial.write(command[arrayPosition]); Serial.write(" no endereco "); Serial.write(i);
+                arrayPosition++;
+        }
+        
+        if (i!=9) {
+                EEPROM.write(i, '|');
+                Serial.write("\nEscrevendo "); Serial.write(command[arrayPosition]); Serial.write(" no endereco "); Serial.write(i);
+        }
+        
+        Serial.write("O conteudo da eeprom:\n");
+        for(int j=0; EEPROM.read(i)!='|'; j++)
+                Serial.write(EEPROM.read(i));
+        
+        return arrayPosition+1;
+}
+
+char VerifyPassword(char *i)
+{
         char verified = 0;
     
-        if (command[i]!='%') {
-                for (; i<=9 && command[i]!='|'; i++) {
-                        if (command[i]== )
+        if (command[*i]!='%') {
+                for (; *i<=9 && command[*i]!='|'; *i++) {
+                        if (command[*i] == EEPROM.read(*i))
                                 verified = 1;
                         else
                                 verified = 0;
-                }   
+                }
+             
+                if(verified && (command[*i] != EEPROM.read(*i)))
+                        verified = 0;   
         }
         
+        *i++;
         return verified;
 }
-*/
+
 void TurnSystemON(void)
 {
         systemStatus = ON;
