@@ -34,7 +34,8 @@ char command[COMMAND_SIZE];
 SoftwareSerial gps = SoftwareSerial(4, 5); // RX, TX
 
 // FUNCTION PROTOTYPES
-char VerifyPassword(char *i);
+char CommandIsValid(void);
+char PasswordIsValid(char *i);
 void TurnSystemON(void);
 void TurnSystemOFF(void);
 void GetSystemStatus(void);
@@ -77,7 +78,7 @@ void loop()
                 GetCommand(1);
         } */
         
-        if(VerifyPassword(&i)){
+        if(CommandIsValid() && PasswordIsValid(&i)){
                 do {
                         switch (command[i]) {
                         case '0': 
@@ -147,39 +148,52 @@ char ChangePassword(char arrayPosition)
         
         for (i=0; command[arrayPosition]!='|'; i++) {
                 EEPROM.write(i, command[arrayPosition]);
-                Serial.write("\nEscrevendo "); Serial.write(command[arrayPosition]); Serial.write(" no endereco "); Serial.write(i);
+                Serial.write("\nEscrevendo "); Serial.write(command[arrayPosition]); Serial.write(" no endereco "); Serial.write((char)(((int)'0')+i));
                 arrayPosition++;
         }
         
         if (i!=9) {
                 EEPROM.write(i, '|');
-                Serial.write("\nEscrevendo "); Serial.write(command[arrayPosition]); Serial.write(" no endereco "); Serial.write(i);
+                Serial.write("\nEscrevendo "); Serial.write(command[arrayPosition]); Serial.write(" no endereco "); Serial.write((char)(((int)'0')+i));
         }
         
-        Serial.write("O conteudo da eeprom:\n");
-        for(int j=0; EEPROM.read(i)!='|'; j++)
-                Serial.write(EEPROM.read(i));
+        Serial.write("\nO conteudo da eeprom:\n");
+        for(int j=0; EEPROM.read(j)!='|'; j++)
+                Serial.write(EEPROM.read(j));
         
         return arrayPosition+1;
 }
 
-char VerifyPassword(char *i)
+char CommandIsValid(void)
 {
-        char verified = 0;
-    
-        if (command[*i]!='%') {
-                for (; *i<=9 && command[*i]!='|'; *i++) {
-                        if (command[*i] == EEPROM.read(*i))
-                                verified = 1;
-                        else
-                                verified = 0;
-                }
-             
-                if(verified && (command[*i] != EEPROM.read(*i)))
-                        verified = 0;   
+        char tmp;
+        
+        if(command[0]=='%')
+                tmp = 0;
+        else
+                tmp = 1;
+        
+        return tmp;
+}
+
+char PasswordIsValid(char *i)
+{
+        char verified = 1;
+        
+        for (; (*i)<=9 && command[*i]!='|' && verified; (*i)++) {
+                Serial.write("\nComparando command "); Serial.write(command[*i]); Serial.write(" com EEPROM "); Serial.write(EEPROM.read(*i)); Serial.write(" no endereco "); Serial.write((char)(((int)'0')+*i));
+                if (command[*i] == EEPROM.read(*i))
+                        verified = 1;
+                else
+                        verified = 0;
         }
         
+        Serial.write("\nUltimo teste comparando command "); Serial.write(command[*i]); Serial.write(" com EEPROM "); Serial.write(EEPROM.read(*i)); Serial.write(" no endereco "); Serial.write((char)(((int)'0')+*i));    
+        if(verified && (command[*i] != EEPROM.read(*i)) && (*i)!=10)
+                verified = 0;
+        
         *i++;
+        Serial.write("\nO retorno da funcao no endereco "); Serial.write((char)(((int)'0')+*i)); Serial.write(" sera "); Serial.write((char)(((int)'0')+verified));
         return verified;
 }
 
