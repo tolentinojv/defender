@@ -9,8 +9,12 @@
 //        3 - Troca de senha
 //        4 - Adicionar novo usuário (telefone 13 digitos)
 // OBS2: EEPROM Codes
-//         - A senha sempre começa no endereço 0 da flash
-
+//        - A senha sempre começa no endereço 0 da flash
+//        - O primeiro numero de telefone esta no endereço 0x0A
+//        - O segundo numero de telefone esta no endereço 0x18
+//        - O terceiro numero de telefone esta no endereço 0x26
+//        - O quarto numero de telefone esta no endereço 0x34
+//        - O quinto numero de telefone esta no endereço 0x42
 
 
 // 1. Pre-processor Directives Section
@@ -35,12 +39,12 @@ SoftwareSerial gps = SoftwareSerial(4, 5); // RX, TX
 
 // FUNCTION PROTOTYPES
 char CommandIsValid(void);
-char PasswordIsValid(char *i);
+char PasswordIsValid(char *);
 void TurnSystemON(void);
 void TurnSystemOFF(void);
 void GetSystemStatus(void);
-char ChangePassword(char arrayPosition);
-char NewUser(char arrayPosition);
+void ChangePassword(char *);
+void CreateNewUsers(char *);
 void GetCommand(char serialSource);
 
 
@@ -90,13 +94,16 @@ void loop()
                                 TurnSystemON();
                                 i++;
                                 break;
-                        case '2': //GetSystemStatus();
+                        case '2': 
+                                //GetSystemStatus();
                                 break;
                         case '3':
                                 i+=2; 
                                 ChangePassword(&i);
                                 break;
-                        case '4': i = NewUser(i+1);
+                        case '4':
+                                i+=2; 
+                                CreateNewUsers(&i);
                                 break;
                         default: ;
                         }
@@ -168,7 +175,7 @@ void ChangePassword(char *i)
                 //Serial.write(EEPROM.read(j));
         
         // Incrementando indice *i para o proximo comando
-        if(command[*i]=='|')
+        if (command[*i]=='|')
                 (*i)++;
         //Serial.write("\nA posicao do comando que esta sendo retornada e: "); Serial.write((char)(((int)'0')+*i));
 }
@@ -177,7 +184,7 @@ char CommandIsValid(void)
 {
         char tmp;
         
-        if(command[0]=='%')
+        if (command[0]=='%')
                 tmp = 0;
         else
                 tmp = 1;
@@ -198,7 +205,7 @@ char PasswordIsValid(char *i)
         }
         
         Serial.write("\nUltimo teste comparando command "); Serial.write(command[*i]); Serial.write(" com EEPROM "); Serial.write(EEPROM.read(*i)); Serial.write(" no endereco "); Serial.write((char)(((int)'0')+*i));    
-        if(verified && (command[*i] != EEPROM.read(*i)) && (*i)!=10)
+        if (verified && (command[*i] != EEPROM.read(*i)) && (*i)!=10)
                 verified = 0;
         
         (*i)++;
@@ -219,8 +226,14 @@ void TurnSystemOFF(void)
         Serial.write("\nSystem is turning off");
 }
 
-char NewUser(char arrayPosition)
+// INPUT: Ponteiro para o idx da senha no command[]
+// OUTPUT: none
+void CreateNewUsers(char *i)
 {
-    
+        while (command[*i] == '+') {
+                
+                
+                
+        }
   
 }
