@@ -12,43 +12,41 @@
 //        5 - Remover usuário
 //        6 - Sincroniza aplicativo com veículo
 //        7 - Limpa todas as informaçoes na memoria
-//  OBS2: EEPROM Codes
+// OBS2: EEPROM Codes
 //        - A senha sempre começa no endereço 0 da flash
 //        - O primeiro numero de telefone esta no endereço 0x0A
 //        - O segundo numero de telefone esta no endereço 0x18
 //        - O terceiro numero de telefone esta no endereço 0x26
 //        - O quarto numero de telefone esta no endereço 0x34
 //        - O quinto numero de telefone esta no endereço 0x42
+//        - Os valores de memoria 0x
 // OBS3: Pin map
-//        0     Bluetooth Rx
-//        1     Bluetooth Tx
+//        0     Bluetooth/Serial Rx
+//        1     Bluetooth/Serial Tx
 //        2     GSM module Rx
 //        3     GSM module Tx
-//        4     GPS module Rx
-//        5     GPS module TX
-//        6     -
-//        7     OPTOCOUPLER
-//        8     -
-//        9     -
-//        10    PIR_SENSOR
-//        11    TILT_SENSOR
-//        12    BUZZER_ALARM
-//        13    -
+//        17    GPS module Rx
+//        16    GPS module TX
+//        23     OPTOCOUPLER
+//        25    PIR_SENSOR
+//        27    TILT_SENSOR
+//        29    BUZZER_ALARM
 
 
 // 1. Pre-processor Directives Section
 //  INCLUDES
 #include <EEPROM.h>
-#include <SoftwareSerial.h>
 #include <TinyGPS.h>
+#include <GSM.h>
 //  DEFINES
 #define COMMAND_SIZE   100
 #define ON             1
 #define OFF            0
-#define OPTOCOUPLER    7
-#define PIR_SENSOR     10
-#define TILT_SENSOR    11
-#define BUZZER_ALARM   12
+#define PINNUMBER      ""
+#define OPTOCOUPLER    23
+#define PIR_SENSOR     25
+#define TILT_SENSOR    27
+#define BUZZER_ALARM   29
 
 
 // 2. Global Declarations section
@@ -56,10 +54,13 @@
 int systemStatus;
 char command[COMMAND_SIZE];
 char usr[5];
-SoftwareSerial gpsSerial(4, 5); // create gps sensor connection
 TinyGPS gps; // create gps object
+GSM gsmAccess; 
+GSM_SMS sms;
+char remoteNumber[20]; // holds the emitting number
 
 // FUNCTION PROTOTYPES
+//void GSMSetup(void);
 void GetCommand(char);
 char CommandIsValid(void);
 char PasswordIsValid(char *);
@@ -85,11 +86,12 @@ void setup()
         // Defining data outputs
         pinMode(OPTOCOUPLER, OUTPUT);
         pinMode(BUZZER_ALARM, OUTPUT);
-  
+
         //Initializing global variables/serial communication
         usr[0] = usr[1] = usr[2] = usr[3] = usr[4] = 0; //
         Serial.begin(9600);
-        gpsSerial.begin(4800);
+        Serial2.begin(4800); // Serial 2 -> GPS
+        GSMSetup();
         TurnSystemOFF();
         
         // Reseting configuration to default
@@ -110,9 +112,9 @@ void loop()
                 //Serial.write("Bluetooth is available.."); 
                 GetCommand(0); 
                 //Serial.write("Saiu do metodo de leitura");
-        } /*else if (gsm.available()) {
+        } else if (sms.available()) {
                 GetCommand(1);
-        } */
+        }
         
         if(CommandIsValid() && PasswordIsValid(&i)){
                 do {
@@ -151,7 +153,8 @@ void loop()
                         }
                 } while (command[i]!='%');
         }
-            
+        
+        // Testing for activate car alarm if is necessary
         if (systemStatus) {
                 if (digitalRead(PIR_SENSOR) || digitalRead(TILT_SENSOR)) {
                         // Send message to car owner
@@ -160,12 +163,32 @@ void loop()
         }
 }
 
+// INPUT: none
+// OUTPUT: none
+void GSMSetup(void)
+{
+        // connection state
+        boolean notConnected = true;
+
+        // Start GSM shield
+        // If your SIM has PIN, pass it as a parameter of begin() in quotes
+        while (notConnected) {
+                if (gsmAccess.begin(PINNUMBER)==GSM_READY) {
+                        notConnected = false;
+                } else {
+                        Serial.println("GSM is not connected yet...");
+                        delay(1000);
+                }
+        }
+        Serial.println("GSM is connected.");     
+}
+
 // INPUT: Porta serial utilizada
 // OUTPUT: none
 void GetCommand(char serialSource)
 {
         char character;
-        char i;
+        char i=0;
     
         if (serialSource == 0) {
                 Serial.write("\nIniciando leitura Bluetooth...\n");
@@ -183,16 +206,19 @@ void GetCommand(char serialSource)
                 Serial.write("Leitura finalizada...\n");
                 Serial.flush();
         } else {
-                /*character = sms.read();
-                while(character==-1){character = sms.read();}
-                
-                command[0] = character;
-                for(i=1; character != '%'; i++){
-                        while(!sms.available());
-                        command[i]  = sms.read();  
+                Serial.write("\nIniciando leitura SMS...\n");
+                while(character=sms.read()) {
+                        if(character!='!')
+                                command[i] = character;
+                        else
+                                command[i] = '|';
+                        Serial.write("Caracter lido:");
+                        Serial.write(character);
+                        Serial.write("\n");
+                        i++;
                 }
-                command[i] = '%'; 
-                sms.flush();*/
+                
+                sms.flush();
         }
 }
 
@@ -291,9 +317,7 @@ void CreateNewUsers(char *i)
         
         if(usrPos == 5 && command[(*i)+13]=='%')
                 (*i)+=13;
-        else if (usrPos == 5 && command[(*i)+13]=='|')
-                (*i)+=14;
-        else if(usrPos == 5 && command[(*i)+14]=='%')
+        else if (usrPos == 5 && (command[(*i)+13]=='|' || command[(*i)+14]=='%'))
                 (*i)+=14;
         else if (usrPos == 5 && command[(*i)+14]=='|')
                 (*i)+=15;
@@ -425,25 +449,19 @@ void ResetConfig(char *i){
 // OUTPUT: none
 void GetSystemStatus(void)
 {
-        long lat,lon; // create variable for latitude and longitude object
-        float speed;
+        float lat,lon; // create variable for latitude and longitude object
+        float f_speed;
         char c;
         char *cardinal;
         
-        gpsSerial.listen();
-        
-        Serial.println("Entrou no get status");
-
-        while (!gpsSerial.available());
-        
-        Serial.println("GPS esta disponivel.");
-        
+        unsigned long start = millis();
         do {
-                c = gpsSerial.read();                
-        } while(!gps.encode(c)); // encode gps data
+                while (Serial2.available())
+                        gps.encode(Serial2.read());
+        } while (millis() - start < 1000);
                 
-        gps.get_position(&lat,&lon); // get latitude and longitude
-        speed = gps.f_speed_kmph();
+        gps.f_get_position(&lat,&lon); // get latitude and longitude
+        f_speed = gps.f_speed_kmph();
         *cardinal = *gps.cardinal(gps.f_course());
         // display position
         Serial.print("Position: ");
@@ -451,6 +469,6 @@ void GetSystemStatus(void)
         Serial.print("lon: ");Serial.println(lon); // print longitude
         Serial.print("Course (degrees): "); Serial.println(gps.f_course()); 
         // And same goes for speed
-        Serial.print("Speed(kmph): "); Serial.println();
+        Serial.print("Speed(kmph): "); Serial.println(f_speed);
 }
 
