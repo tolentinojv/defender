@@ -2,7 +2,7 @@
 //  Car security system for use with smartphones
 //  Author: João Victor Tolentino
 //  Email: tolentino.jv@gmail.com
-//  Date: 2/20/2014
+//  Date: 3/23/2014
 //  OBS1: System codes:
 //        0 - Desliga o sistema
 //        1 - Liga o sistema
@@ -12,14 +12,14 @@
 //        5 - Remover usuário
 //        6 - Sincroniza aplicativo com veículo
 //        7 - Limpa todas as informaçoes na memoria
-// OBS2: EEPROM Codes
-//        - A senha sempre começa no endereço 0 da flash
-//        - O primeiro numero de telefone esta no endereço 0x0A
-//        - O segundo numero de telefone esta no endereço 0x18
-//        - O terceiro numero de telefone esta no endereço 0x26
-//        - O quarto numero de telefone esta no endereço 0x34
-//        - O quinto numero de telefone esta no endereço 0x42
-//        - Os valores de memoria 0x
+// OBS2: Memory map (EEPROM)
+//        0 - 9: Password
+//        A - E: Usr positions
+//        14 - 28: Usr1 phone
+//        29 - 3D: Usr2 phone
+//        3E - 52: Usr3 phone
+//        53 - 67: Usr4 phone
+//        68 - 7C: Usr5 phone 
 // OBS3: Pin map
 //        0     Bluetooth/Serial Rx
 //        1     Bluetooth/Serial Tx
@@ -31,7 +31,9 @@
 //        25    PIR_SENSOR
 //        27    TILT_SENSOR
 //        29    BUZZER_ALARM
-
+// OBS4: O comando para adicionar usuario deverá ser sempre preenchido com
+//       20 char e com os demais digitos vazios preenchidos com 'x'
+//               Exemplo:	1234|4 +553185977237xxxxxxx%
 
 // 1. Pre-processor Directives Section
 //  INCLUDES
@@ -47,7 +49,12 @@
 #define PIR_SENSOR     25
 #define TILT_SENSOR    27
 #define BUZZER_ALARM   29
-#define EEPROM_SIZE    4096
+#define EEPROM_SIZE    0x1000
+#define USRPOS1        0x14
+#define USRPOS2        0x29
+#define USRPOS3        0x3E
+#define USRPOS4        0x53
+#define USRPOS5        0x68
 
 // 2. Global Declarations section
 // GLOBAL VARIABLES
@@ -72,6 +79,7 @@ void CreateNewUsers(char *);
 void NewUser(char *, char);
 void RemoveUser(char *);
 char GetMemoryAddress(char);
+char GetUsrPosAddress(char);
 void ResetConfig(char *);
 void GetGPSInfo(float *, float *, float *, float *);
 void MsgGen(float, float, float, float, char *);
@@ -91,7 +99,11 @@ void setup()
         pinMode(BUZZER_ALARM, OUTPUT);
 
         //Initializing global variables/serial communication
-        usr[0] = usr[1] = usr[2] = usr[3] = usr[4] = 0; //
+        usr[0] = EEPROM.read(0x0A);
+        usr[1] = EEPROM.read(0x0B);
+        usr[2] = EEPROM.read(0x0C);
+        usr[3] = EEPROM.read(0x0D);
+        usr[4] = EEPROM.read(0x0E); //
         Serial.begin(9600);
         Serial2.begin(4800); // Serial 2 -> GPS
         GSMSetup();
@@ -152,7 +164,10 @@ void loop()
                         case '7':
                                 ResetConfig(&i);// Comando so pode ser utilizado individualmente
                                 break;
-                        default: ;
+                        case '%':
+                                break;
+                        default: 
+                                i++; //Caracter nao reconhecido pula
                         }
                 } while (command[i]!='%');
         }
@@ -161,6 +176,7 @@ void loop()
         if (systemStatus) {
                 if (digitalRead(PIR_SENSOR) || digitalRead(TILT_SENSOR)) {
                         // Send message to car owner
+                        GetSystemStatus();
                         digitalWrite(BUZZER_ALARM, HIGH);
                 }
         }
@@ -316,14 +332,11 @@ void CreateNewUsers(char *i)
         char usrPos;
 
         usrPos = FindEmptyUsr();
+        
         NewUser(i, usrPos);
         
-        if(usrPos == 5 && command[(*i)+13]=='%')
-                (*i)+=13;
-        else if (usrPos == 5 && (command[(*i)+13]=='|' || command[(*i)+14]=='%'))
-                (*i)+=14;
-        else if (usrPos == 5 && command[(*i)+14]=='|')
-                (*i)+=15;
+        if(usrPos == 5) // 20 eh quantidade de caracteres do numero de telefone no comando
+                (*i)+=20;
 }
 
 // INPUT:  Ponteiro para o idx no command[]
@@ -332,31 +345,31 @@ void CreateNewUsers(char *i)
 void NewUser(char *i, char usrPos)
 {
         char address;
+        char usrPosAddress;
         char temp;
 
-        address = GetMemoryAddress(usrPos);
+        address = GetMemoryAddress(usrPos); // Retorna posicao de memoria referente ao armazenamento do numero do usuario
+        usrPosAddress = GetUsrPosAddress(usrPos); // Retorna posicao de memoria referente ao usuario (Existe ou nao)
         
         Serial.write("\nCadastrando novo usuario no endereco de memoria ");Serial.print(address);
         
         if (address != 0) {
+                usr[usrPos] = 1; EEPROM.write(usrPosAddress, (char)1);
                 temp = address;
-                // Erro no while 
-                while (command[*i]!='|' && command[*i]!='%' && command[*i]!=',') {
-                        EEPROM.write(address, command[*i]);
-                        Serial.write("\nEscrevendo "); Serial.write(command[*i]); Serial.write(" no endereco "); Serial.write(address);
+                
+                while (command[*i]!='|' && command[*i]!='%') {
+                        if (command[*i]!='x') {
+                                EEPROM.write(address, command[*i]);
+                                Serial.write("\nEscrevendo "); Serial.write(command[*i]); Serial.write(" no endereco "); Serial.write(address);
+                        } else {
+                                EEPROM.write(address, '\0');       
+                        }
                         address++;
                         (*i)++;
                 }
-
-                if (address-temp == 13) {// +xx xx xxxxx xxxx 
-                        EEPROM.write(address, 'x');
-                        Serial.write("\nEscrevendo x no endereco "); Serial.write((char)(((int)'0')+address));
-                }
-
-                usr[usrPos] = 1;
                 
-                if(command[*i] == '|' || command[*i] == ',')
-                        (*i)++;
+                //if(command[*i] == '|' || command[*i] == ',')
+                (*i)++;
         }
 }
 
@@ -365,27 +378,19 @@ void NewUser(char *i, char usrPos)
 void RemoveUser(char *i)
 {
         char idx = command[*i] - '0';
-        int address, lastAddress;
+        int address, lastAddress, usrPosAddress;
 
         if (idx>=0 && idx<=4) {
                 Serial.write("\nRemovendo o usuario: "); Serial.write(command[*i]);
-                usr[idx] = 0;
+                
+                usrPosAddress = GetUsrPosAddress(idx);
+                usr[idx] = 0; EEPROM.write(usrPosAddress, (char)0);
 
                 address = GetMemoryAddress(idx);
-                lastAddress = address + 13; // O espaço reservado para um usuario na 
-                                        // memória é de 14 bytes, ou seja, o endereço 
-                                        // apontado atualmente mais 13 bytes
-
-                while (address != lastAddress) {
-                        EEPROM.write(address, 0);
-                        address++;
-                }
+                EEPROM.write(address, '\0');
         }
 
-        if(command[(*i)+1] == '%')
-                (*i)++;
-        else
-                (*i)+=2;
+        (*i)++; // Avança o comando
 }
 
 // INPUT:  Indice do usuário
@@ -396,22 +401,51 @@ char GetMemoryAddress(char idx)
 
         switch (idx) {
         case 0:
-                address = 10;
+                address = USRPOS1;
                 break;
         case 1:
-                address = 24;
+                address = USRPOS2;
                 break;
         case 2:
-                address = 38;
+                address = USRPOS3;
                 break;
         case 3:
-                address = 52;
+                address = USRPOS4;
                 break;
         case 4:
-                address = 66;
+                address = USRPOS5;
                 break;
         default:
-                address = 0;
+                address = 0x00;
+        }
+
+        return address;
+}
+
+// INPUT:  Indice do usuário
+// OUTPUT: Endereço de memória
+char GetUsrPosAddress(char idx)
+{
+        char address;
+
+        switch (idx) {
+        case 0:
+                address = 0x0A;
+                break;
+        case 1:
+                address = 0x0B;
+                break;
+        case 2:
+                address = 0x0C;
+                break;
+        case 3:
+                address = 0x0D;
+                break;
+        case 4:
+                address = 0x0E;
+                break;
+        default:
+                address = 0x00;
         }
 
         return address;
