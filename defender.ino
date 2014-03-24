@@ -47,7 +47,7 @@
 #define PIR_SENSOR     25
 #define TILT_SENSOR    27
 #define BUZZER_ALARM   29
-
+#define EEPROM_SIZE    4096
 
 // 2. Global Declarations section
 // GLOBAL VARIABLES
@@ -73,7 +73,10 @@ void NewUser(char *, char);
 void RemoveUser(char *);
 char GetMemoryAddress(char);
 void ResetConfig(char *);
-
+void GetGPSInfo(float *, float *, float *, float *);
+void MsgGen(float, float, float, float, char *);
+void GetPhoneNumber(char *, char);
+void SendSMS(char *, char *);
 
 // 3. Subroutines Section
 // Rotina de configuração do uC
@@ -421,7 +424,7 @@ char FindEmptyUsr(void) {
 
         for (int i=0; i<5 && tmp==5; i++) {
                 if (usr[i] == 0)
-                        tmp = i;
+                        tmp = i; // Se o valor de tmp for alterado, o usuario foi encontrado e saimos do loop
         }
         
         Serial.write("\nO usuario vazio encontrado foi: ");Serial.write((char)(((int)'0')+tmp));
@@ -432,10 +435,10 @@ char FindEmptyUsr(void) {
 // INPUT:  none
 // OUTPUT: none
 void ResetConfig(char *i){
-        for (int address=0; address<1024; address++)
+        for (int address=0; address<EEPROM_SIZE; address++)
                 EEPROM.write(address, 0);
         
-        //Serial.write("\nEEPROM was clared");
+        //Serial.write("\nEEPROM was cleared");
         
         usr[0] = usr[1] = usr[2] = usr[3] = usr[4] = 0; // Reset users
         command[0]='1'; command[1]='2'; command[2]='3'; command[3]='4'; command[4]='|'; 
@@ -449,26 +452,81 @@ void ResetConfig(char *i){
 // OUTPUT: none
 void GetSystemStatus(void)
 {
-        float lat,lon; // create variable for latitude and longitude object
-        float f_speed;
-        char c;
-        char *cardinal;
+        float flat, flong, fspeed, fcourse;
+        char msg[200], phoneNumber[20];
         
+        GetGPSInfo(&flat, &flong, &fspeed, &fcourse);
+        MsgGen(flat, flong, fspeed, fcourse, msg);
+        
+        // Os alertas serao enviados para os usuarios
+        for (char i=0; i<5; i++) {
+                if (usr[i]==1) { // Se o usuario existir envia alerta
+                        GetPhoneNumber(phoneNumber, i);
+                        SendSMS(msg, phoneNumber);
+                }
+        }
+}
+
+// INPUT:  none
+// OUTPUT: none
+void GetGPSInfo(float *flat, float *flong, float *fspeed, float *fcourse)
+{
         unsigned long start = millis();
+        
         do {
                 while (Serial2.available())
                         gps.encode(Serial2.read());
         } while (millis() - start < 1000);
                 
-        gps.f_get_position(&lat,&lon); // get latitude and longitude
-        f_speed = gps.f_speed_kmph();
-        *cardinal = *gps.cardinal(gps.f_course());
-        // display position
-        Serial.print("Position: ");
-        Serial.print("lat: ");Serial.print(lat);Serial.print(" ");// print latitude
-        Serial.print("lon: ");Serial.println(lon); // print longitude
-        Serial.print("Course (degrees): "); Serial.println(gps.f_course()); 
-        // And same goes for speed
-        Serial.print("Speed(kmph): "); Serial.println(f_speed);
+        gps.f_get_position(flat, flong); // get latitude and longitude
+        *fspeed = gps.f_speed_kmph(); // get speed
+        *fcourse = gps.f_course(); // get course
 }
 
+// INPUT:  none
+// OUTPUT: none
+void MsgGen(float flat, float flong, float fspeed, float fcourse, char msg[])
+{
+        char *latitude, *longitude, *gpsSpeed, *gpsCourse;
+        
+        sprintf(latitude, "%f", flat);
+        sprintf(longitude, "%f", flong);
+        sprintf(gpsSpeed, "%f", fspeed);
+        sprintf(gpsCourse, "%f", fcourse);
+        
+        strcpy(msg, "Defender Alert - Latitude: "); // 27 characters
+        strcat(msg, latitude);
+        strcat(msg, ", Longitude: ");
+        strcat(msg, longitude);
+        strcat(msg, ", Speed(kmph): ");
+        strcat(msg, gpsSpeed);
+        strcat(msg, ", Course(deg):");
+        strcat(msg, gpsCourse);
+}
+
+// INPUT:  none
+// OUTPUT: none
+void GetPhoneNumber(char phoneNumber[], char usrPos)
+{
+        char address = GetMemoryAddress(usrPos);
+        char fixedAddress = address;
+        char i=0;
+        
+        if (address != 0) {
+                while ((EEPROM.read(address) != '\0') && (address != (fixedAddress+20))) {
+                        phoneNumber[i] = EEPROM.read(address);
+                        address++; i++;
+                }
+        } else {
+                phoneNumber[0] = 0;
+        }
+}
+
+// INPUT:  none
+// OUTPUT: none
+void SendSMS(char msg[], char remoteNumber[])
+{
+        sms.beginSMS(remoteNumber);
+        sms.print(msg);
+        sms.endSMS();
+}
