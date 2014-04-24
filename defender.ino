@@ -58,7 +58,8 @@
 
 // 2. Global Declarations section
 // GLOBAL VARIABLES
-int systemStatus;
+char systemStatus;
+char prevSystemStatus;
 char command[COMMAND_SIZE];
 char usr[5];
 TinyGPS gps; // create gps object
@@ -73,18 +74,21 @@ char CommandIsValid(void);
 char PasswordIsValid(char *);
 void TurnSystemON(void);
 void TurnSystemOFF(void);
-void GetSystemStatus(void);
+void SendSystemStatus(void);
 void ChangePassword(char *);
 void CreateNewUsers(char *);
 void NewUser(char *, char);
 void RemoveUser(char *);
 char GetMemoryAddress(char);
 char GetUsrPosAddress(char);
+void SerialWriteNumber(char);
 void ResetConfig(char *);
 void GetGPSInfo(float *, float *, float *, float *);
 void MsgGen(float, float, float, float, char *);
 void GetPhoneNumber(char *, char);
 void SendSMS(char *, char *);
+void WriteSMS(char*, char *);
+void ConvertFloatToString(char *, float, char);
 
 // 3. Subroutines Section
 // Rotina de configuração do uC
@@ -108,6 +112,7 @@ void setup()
         Serial2.begin(4800); // Serial 2 -> GPS
         GSMSetup();
         TurnSystemOFF();
+        prevSystemStatus = OFF;
         
         // Reseting configuration to default
         command[0]='1'; command[1]='2'; command[2]='3'; command[3]='4'; command[4]='|';
@@ -144,7 +149,7 @@ void loop()
                                 break;
                         case '2':
                                 i++;
-                                GetSystemStatus();
+                                SendSystemStatus();
                                 break;
                         case '3':
                                 i+=2; 
@@ -173,12 +178,15 @@ void loop()
         }
         
         // Testing for activate car alarm if is necessary
-        if (systemStatus) {
+        if (systemStatus && !prevSystemStatus) {
                 if (digitalRead(PIR_SENSOR) || digitalRead(TILT_SENSOR)) {
                         // Send message to car owner
-                        GetSystemStatus();
+                        //SendSystemStatus();
                         digitalWrite(BUZZER_ALARM, HIGH);
+                        prevSystemStatus = ON;
                 }
+        } else if (!systemStatus && prevSystemStatus) {
+                prevSystemStatus = OFF;       
         }
 }
 
@@ -249,15 +257,15 @@ void ChangePassword(char *i)
         
         for (address=0; command[*i]!='|' && command[*i]!='%'; address++) {
                 EEPROM.write(address, command[*i]);
-                Serial.write("\nEscrevendo "); Serial.write(command[*i]); Serial.write(" no endereco "); Serial.write((char)(((int)'0')+address));
-                Serial.write("\nIndice atual e: "); Serial.write((char)(((int)'0')+*i));
+                Serial.write("\nEscrevendo "); Serial.write(command[*i]); Serial.write(" no endereco "); SerialWriteNumber(address);
+                Serial.write("\nIndice atual e: "); SerialWriteNumber(*i);
                 (*i)++;
         }
-        Serial.write("\nNa saida do loop o indice atual e: "); Serial.write((char)(((int)'0')+*i));
+        Serial.write("\nNa saida do loop o indice atual e: "); SerialWriteNumber(*i);
         
         // Escrevendo '|' no ultimo endereço, podendo ser 8 ou anterior
         EEPROM.write(address, '|');
-        Serial.write("\nEscrevendo '|' no endereco "); Serial.write((char)(((int)'0')+address));
+        Serial.write("\nEscrevendo '|' no endereco "); SerialWriteNumber(address);
         
         Serial.write("\nO conteudo da eeprom:\n");
         for(int j=0; EEPROM.read(j)!='|'; j++)
@@ -266,7 +274,7 @@ void ChangePassword(char *i)
         // Incrementando indice *i para o proximo comando
         if (command[*i]=='|')
                 (*i)++;
-        Serial.write("\nA posicao do comando que esta sendo retornada e: "); Serial.write((char)(((int)'0')+*i));
+        Serial.write("\nA posicao do comando que esta sendo retornada e: "); SerialWriteNumber(*i);
 }
 
 // INPUT: none
@@ -351,7 +359,7 @@ void NewUser(char *i, char usrPos)
         address = GetMemoryAddress(usrPos); // Retorna posicao de memoria referente ao armazenamento do numero do usuario
         usrPosAddress = GetUsrPosAddress(usrPos); // Retorna posicao de memoria referente ao usuario (Existe ou nao)
         
-        Serial.write("\nCadastrando novo usuario no endereco de memoria ");Serial.print(address);
+        Serial.write("\nCadastrando novo usuario no endereco de memoria "); SerialWriteNumber(address);
         
         if (address != 0) {
                 usr[usrPos] = 1; EEPROM.write(usrPosAddress, (char)1);
@@ -360,7 +368,7 @@ void NewUser(char *i, char usrPos)
                 while (command[*i]!='|' && command[*i]!='%') {
                         if (command[*i]!='x') {
                                 EEPROM.write(address, command[*i]);
-                                Serial.write("\nEscrevendo "); Serial.write(command[*i]); Serial.write(" no endereco "); Serial.write(address);
+                                Serial.write("\nEscrevendo "); Serial.write(command[*i]); Serial.write(" no endereco "); SerialWriteNumber(address);
                         } else {
                                 EEPROM.write(address, '\0');       
                         }
@@ -453,7 +461,8 @@ char GetUsrPosAddress(char idx)
 
 // INPUT:  none
 // OUTPUT: Indice do usuário
-char FindEmptyUsr(void) {
+char FindEmptyUsr(void)
+{
         char tmp = 5;
 
         for (int i=0; i<5 && tmp==5; i++) {
@@ -461,14 +470,34 @@ char FindEmptyUsr(void) {
                         tmp = i; // Se o valor de tmp for alterado, o usuario foi encontrado e saimos do loop
         }
         
-        Serial.write("\nO usuario vazio encontrado foi: ");Serial.write((char)(((int)'0')+tmp));
+        Serial.write("\nO usuario vazio encontrado foi: "); SerialWriteNumber(tmp);
         
         return tmp;
 }
 
 // INPUT:  none
 // OUTPUT: none
-void ResetConfig(char *i){
+void SerialWriteNumber(char address)
+{
+        char count = 0;
+        char buffer[4];
+        
+        do {
+                buffer[count] = '0' + (address%10);
+                address = address/10;
+                count++;
+        } while (address != 0);
+        
+        do {
+                Serial.write(buffer[count-1]);
+                count--;
+        } while (count>0);
+}
+
+// INPUT:  none
+// OUTPUT: none
+void ResetConfig(char *i)
+{
         for (int address=0; address<EEPROM_SIZE; address++)
                 EEPROM.write(address, 0);
         
@@ -484,7 +513,7 @@ void ResetConfig(char *i){
 
 // INPUT:  none
 // OUTPUT: none
-void GetSystemStatus(void)
+void SendSystemStatus(void)
 {
         float flat, flong, fspeed, fcourse;
         char msg[200], phoneNumber[20];
@@ -496,7 +525,8 @@ void GetSystemStatus(void)
         for (char i=0; i<5; i++) {
                 if (usr[i]==1) { // Se o usuario existir envia alerta
                         GetPhoneNumber(phoneNumber, i);
-                        SendSMS(msg, phoneNumber);
+                        // SendSMS(msg, phoneNumber);
+                        WriteSMS(msg, phoneNumber);
                 }
         }
 }
@@ -521,12 +551,24 @@ void GetGPSInfo(float *flat, float *flong, float *fspeed, float *fcourse)
 // OUTPUT: none
 void MsgGen(float flat, float flong, float fspeed, float fcourse, char msg[])
 {
-        char *latitude, *longitude, *gpsSpeed, *gpsCourse;
+        char latitude[11];
+        char longitude[11];
+        char gpsSpeed[11];
+        char gpsCourse[11];
         
-        sprintf(latitude, "%f", flat);
-        sprintf(longitude, "%f", flong);
-        sprintf(gpsSpeed, "%f", fspeed);
-        sprintf(gpsCourse, "%f", fcourse);
+        ConvertFloatToString(latitude, flat, 5);
+        sprintf(longitude, flong, 5);
+        sprintf(gpsSpeed, fspeed, 2);
+        sprintf(gpsCourse, fcourse, 2);
+        
+        Serial.write("\nDefender Alert - Latitude: "); // 27 characters
+        Serial.write(latitude);
+        Serial.write(", Longitude: ");
+        Serial.write(longitude);
+        Serial.write(", Speed(kmph): ");
+        Serial.print(gpsSpeed);
+        Serial.write(", Course(deg):");
+        Serial.print(gpsCourse);
         
         strcpy(msg, "Defender Alert - Latitude: "); // 27 characters
         strcat(msg, latitude);
@@ -563,4 +605,47 @@ void SendSMS(char msg[], char remoteNumber[])
         sms.beginSMS(remoteNumber);
         sms.print(msg);
         sms.endSMS();
+        Serial.write("Message was sended.");
+}
+
+//INPUT: none
+//OUTPUT: none
+void WriteSMS(char msg[], char remoteNumber[])
+{
+        Serial.write(remoteNumber);
+        Serial.print(": ");
+        Serial.write(msg);
+}
+
+void ConvertFloatToString(char string[], float value, char casasDec)
+{
+	char temp0[10];
+	unsigned char i = 0;
+	unsigned char j = 0;
+	unsigned long temp1 = value * (10^casasDec);
+
+	while (temp1 != 0) {
+		if (i!=casasDec) {
+			temp0[i] = (temp1 % 10) + 0x30;
+			temp1 /= 10;
+			i++;
+		} else {
+			temp[i] = '.';
+			i++;
+		}
+	}
+
+	if (value < 0) {
+		temp0[i] = '-';
+		temp0[i+1] = 0;
+	} else {
+		temp0[i] = 0;
+		i--;
+	}
+
+	while (i >= 0) {
+		string[j] = temp[i];
+		j++;i--;
+	}
+	string[j] = 0;
 }
