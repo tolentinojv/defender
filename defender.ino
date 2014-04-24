@@ -110,7 +110,7 @@ void setup()
         usr[4] = EEPROM.read(0x0E); //
         Serial.begin(9600);
         Serial2.begin(4800); // Serial 2 -> GPS
-        GSMSetup();
+        //GSMSetup();
         TurnSystemOFF();
         prevSystemStatus = OFF;
         
@@ -515,10 +515,14 @@ void ResetConfig(char *i)
 // OUTPUT: none
 void SendSystemStatus(void)
 {
+        Serial.write("\n\nStarting to send system status to users..");
+        
         float flat, flong, fspeed, fcourse;
         char msg[200], phoneNumber[20];
         
+        Serial.write("\nGetting gps informations..");
         GetGPSInfo(&flat, &flong, &fspeed, &fcourse);
+        Serial.write("\nCreating the message..");
         MsgGen(flat, flong, fspeed, fcourse, msg);
         
         // Os alertas serao enviados para os usuarios
@@ -557,9 +561,9 @@ void MsgGen(float flat, float flong, float fspeed, float fcourse, char msg[])
         char gpsCourse[11];
         
         ConvertFloatToString(latitude, flat, 5);
-        sprintf(longitude, flong, 5);
-        sprintf(gpsSpeed, fspeed, 2);
-        sprintf(gpsCourse, fcourse, 2);
+        ConvertFloatToString(longitude, flong, 5);
+        ConvertFloatToString(gpsSpeed, fspeed, 2);
+        ConvertFloatToString(gpsCourse, fcourse, 2);
         
         Serial.write("\nDefender Alert - Latitude: "); // 27 characters
         Serial.write(latitude);
@@ -615,36 +619,53 @@ void WriteSMS(char msg[], char remoteNumber[])
         Serial.write(remoteNumber);
         Serial.print(": ");
         Serial.write(msg);
+        Serial.write("\n");
 }
 
 void ConvertFloatToString(char string[], float value, char casasDec)
 {
-	char temp0[10];
-	unsigned char i = 0;
-	unsigned char j = 0;
-	unsigned long temp1 = value * (10^casasDec);
-
+	unsigned char isNegative = 0;
+        char temp[10];
+	char i = 0;
+	char j = 0;
+	long temp1 = value * pow(10, casasDec);
+        
+        Serial.write("\n\n - Converting float value to string..\n");
+        
+        if (temp1 < 0) {
+                isNegative = 1;
+                temp1 = -temp1;   
+        }
+                
+        Serial.println(value);
+        Serial.println(temp1);
+        
 	while (temp1 != 0) {
 		if (i!=casasDec) {
-			temp0[i] = (temp1 % 10) + 0x30;
+			temp[i] = (temp1 % 10) + '0';
 			temp1 /= 10;
 			i++;
 		} else {
 			temp[i] = '.';
 			i++;
 		}
+                Serial.write(temp[i-1]);
 	}
 
-	if (value < 0) {
-		temp0[i] = '-';
-		temp0[i+1] = 0;
+	if (isNegative) {
+		temp[i] = '-';
+                Serial.write(temp[i]);
+		temp[i+1] = 0;
 	} else {
-		temp0[i] = 0;
+		temp[i] = 0;
 		i--;
 	}
-
+        
+        Serial.write("\n");
+        
 	while (i >= 0) {
 		string[j] = temp[i];
+                Serial.write(string[j]);
 		j++;i--;
 	}
 	string[j] = 0;
