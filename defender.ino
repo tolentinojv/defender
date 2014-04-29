@@ -20,6 +20,7 @@
 //        3E - 52: Usr3 phone
 //        53 - 67: Usr4 phone
 //        68 - 7C: Usr5 phone 
+//        80 - 88: Password code 
 // OBS3: Pin map
 //        0     Bluetooth/Serial Rx
 //        1     Bluetooth/Serial Tx
@@ -33,7 +34,9 @@
 //        29    BUZZER_ALARM
 // OBS4: O comando para adicionar usuario deverá ser sempre preenchido com
 //       20 char e com os demais digitos vazios preenchidos com 'x'
-//               Exemplo:	1234|4 +553185977237xxxxxxx%
+//               Exemplo:	1234|4 +553185977237%
+// OBS5: O sistema tera um codigo na EEPROM (0x80 - 0x88) que valide se a
+//        senha ja foi preenchida, ou seja, se o programa ja rodou alguma vez
 
 // 1. Pre-processor Directives Section
 //  INCLUDES
@@ -68,7 +71,8 @@ GSM_SMS sms;
 char remoteNumber[20]; // holds the emitting number
 
 // FUNCTION PROTOTYPES
-//void GSMSetup(void);
+void IsFirstRun(void);
+void GSMSetup(void);
 void GetCommand(char);
 char CommandIsValid(void);
 char PasswordIsValid(char *);
@@ -102,22 +106,23 @@ void setup()
         pinMode(OPTOCOUPLER, OUTPUT);
         pinMode(BUZZER_ALARM, OUTPUT);
 
-        //Initializing global variables/serial communication
+        // Initializing global variables/serial communication
         usr[0] = EEPROM.read(0x0A);
         usr[1] = EEPROM.read(0x0B);
         usr[2] = EEPROM.read(0x0C);
         usr[3] = EEPROM.read(0x0D);
-        usr[4] = EEPROM.read(0x0E); //
+        usr[4] = EEPROM.read(0x0E);
         Serial.begin(9600);
         Serial2.begin(4800); // Serial 2 -> GPS
-        //GSMSetup();
-        TurnSystemOFF();
-        prevSystemStatus = OFF;
+        GSMSetup();
         
-        // Reseting configuration to default
-        command[0]='1'; command[1]='2'; command[2]='3'; command[3]='4'; command[4]='|';
-        char i = 0;
-        ChangePassword(&i);
+        
+        // Verifying if the system has a valid password
+        IsFirstRun();
+        
+        // When starting the sistem is on
+        TurnSystemON();
+        prevSystemStatus = OFF;
 }
 
 // Loop principal do sistema
@@ -128,13 +133,10 @@ void loop()
         
         //Teste é feito de acordo com disponibilidade dos meios de comunicação, caso bluetooth esteja disponível, enviamos 0 para a função getCommand
         //caso o GSM esteja disponível, enviamos 1.
-        if (Serial.available()) {
-                //Serial.write("Bluetooth is available.."); 
-                GetCommand(0); 
-                //Serial.write("Saiu do metodo de leitura");
-        } else if (sms.available()) {
+        if (Serial.available())
+                GetCommand(0);
+        else if (sms.available())
                 GetCommand(1);
-        }
         
         if(CommandIsValid() && PasswordIsValid(&i)){
                 do {
@@ -181,13 +183,40 @@ void loop()
         if (systemStatus && !prevSystemStatus) {
                 if (digitalRead(PIR_SENSOR) || digitalRead(TILT_SENSOR)) {
                         // Send message to car owner
-                        //SendSystemStatus();
+                        SendSystemStatus();
                         digitalWrite(BUZZER_ALARM, HIGH);
                         prevSystemStatus = ON;
                 }
         } else if (!systemStatus && prevSystemStatus) {
                 prevSystemStatus = OFF;       
         }
+}
+
+// INPUT: none
+// OUTPUT: none
+void IsFirstRun(void)
+{
+        long address = 0x80;
+        long finalPosition = 0x88;
+        char i;
+        
+        for (i=0; (i<9) && (EEPROM.read(address+i)==(i+'0')); i++);
+        
+        // Se i for menor que 9, eh a primeira vez que o programa esta rodando
+        if (i<9) {
+                // Setting password to default
+                command[0]='1'; command[1]='2'; command[2]='3'; command[3]='4'; command[4]='|';
+                i = 0;
+                ChangePassword(&i);
+                
+                // Setting password verifying code
+                i=0;
+                while (address <= finalPosition) {
+                       EEPROM.write(address, i+'0');
+                       i++; address++; 
+                } 
+        }
+                        
 }
 
 // INPUT: none
@@ -343,8 +372,11 @@ void CreateNewUsers(char *i)
         
         NewUser(i, usrPos);
         
-        if(usrPos == 5) // 20 eh quantidade de caracteres do numero de telefone no comando
-                (*i)+=20;
+        // Caso nao exista posicao disponivel para armazenar usuario
+        if (usrPos == 5) {
+                while (command[*i]!='|' && command[*i]!='%')
+                        i++;
+        }
 }
 
 // INPUT:  Ponteiro para o idx no command[]
@@ -366,18 +398,15 @@ void NewUser(char *i, char usrPos)
                 temp = address;
                 
                 while (command[*i]!='|' && command[*i]!='%') {
-                        if (command[*i]!='x') {
-                                EEPROM.write(address, command[*i]);
-                                Serial.write("\nEscrevendo "); Serial.write(command[*i]); Serial.write(" no endereco "); SerialWriteNumber(address);
-                        } else {
-                                EEPROM.write(address, '\0');       
-                        }
+                        EEPROM.write(address, command[*i]);
+                        Serial.write("\nEscrevendo "); Serial.write(command[*i]); Serial.write(" no endereco "); SerialWriteNumber(address);
+                        
                         address++;
                         (*i)++;
                 }
                 
-                //if(command[*i] == '|' || command[*i] == ',')
-                (*i)++;
+                EEPROM.write(address, '\0');
+                Serial.write("\nEscrevendo "); Serial.write("\0"); Serial.write(" no endereco "); SerialWriteNumber(address);
         }
 }
 
@@ -460,22 +489,6 @@ char GetUsrPosAddress(char idx)
 }
 
 // INPUT:  none
-// OUTPUT: Indice do usuário
-char FindEmptyUsr(void)
-{
-        char tmp = 5;
-
-        for (int i=0; i<5 && tmp==5; i++) {
-                if (usr[i] == 0)
-                        tmp = i; // Se o valor de tmp for alterado, o usuario foi encontrado e saimos do loop
-        }
-        
-        Serial.write("\nO usuario vazio encontrado foi: "); SerialWriteNumber(tmp);
-        
-        return tmp;
-}
-
-// INPUT:  none
 // OUTPUT: none
 void SerialWriteNumber(char address)
 {
@@ -492,6 +505,22 @@ void SerialWriteNumber(char address)
                 Serial.write(buffer[count-1]);
                 count--;
         } while (count>0);
+}
+
+// INPUT:  none
+// OUTPUT: Indice do usuário
+char FindEmptyUsr(void)
+{
+        char tmp = 5;
+
+        for (int i=0; i<5 && tmp==5; i++) {
+                if (usr[i] == 0)
+                        tmp = i; // Se o valor de tmp for alterado, o usuario foi encontrado e saimos do loop
+        }
+        
+        Serial.write("\nO usuario vazio encontrado foi: "); SerialWriteNumber(tmp);
+        
+        return tmp;
 }
 
 // INPUT:  none
@@ -529,8 +558,8 @@ void SendSystemStatus(void)
         for (char i=0; i<5; i++) {
                 if (usr[i]==1) { // Se o usuario existir envia alerta
                         GetPhoneNumber(phoneNumber, i);
-                        // SendSMS(msg, phoneNumber);
-                        WriteSMS(msg, phoneNumber);
+                        SendSMS(msg, phoneNumber);
+                        //WriteSMS(msg, phoneNumber);
                 }
         }
 }
@@ -597,6 +626,7 @@ void GetPhoneNumber(char phoneNumber[], char usrPos)
                         phoneNumber[i] = EEPROM.read(address);
                         address++; i++;
                 }
+                phoneNumber[i] = '\0';
         } else {
                 phoneNumber[0] = 0;
         }
@@ -609,7 +639,8 @@ void SendSMS(char msg[], char remoteNumber[])
         sms.beginSMS(remoteNumber);
         sms.print(msg);
         sms.endSMS();
-        Serial.write("Message was sended.");
+        Serial.write("\nMessage was sended to ");
+        Serial.write(remoteNumber);
 }
 
 //INPUT: none
@@ -622,24 +653,31 @@ void WriteSMS(char msg[], char remoteNumber[])
         Serial.write("\n");
 }
 
+//INPUT: none
+//OUTPUT: none
 void ConvertFloatToString(char string[], float value, char casasDec)
 {
 	unsigned char isNegative = 0;
-        char temp[10];
+    char temp[10];
 	char i = 0;
 	char j = 0;
 	long temp1 = value * pow(10, casasDec);
         
-        Serial.write("\n\n - Converting float value to string..\n");
-        
-        if (temp1 < 0) {
-                isNegative = 1;
-                temp1 = -temp1;   
-        }
-                
-        Serial.println(value);
-        Serial.println(temp1);
-        
+    Serial.write("\n\n - Converting float value to string..\n");
+    
+    
+    // Determina se o número é negativo
+    // Possibilidade de criar função
+    if (temp1 < 0) {
+            isNegative = 1;
+            temp1 = -temp1;   
+    }
+            
+    Serial.println(value);
+    Serial.println(temp1);
+    
+
+    // Escreve o módulo do número ao contrário em uma string auxiliar
 	while (temp1 != 0) {
 		if (i!=casasDec) {
 			temp[i] = (temp1 % 10) + '0';
@@ -652,6 +690,21 @@ void ConvertFloatToString(char string[], float value, char casasDec)
                 Serial.write(temp[i-1]);
 	}
 
+	// Caso o número seja menor que zero, foi necessária a alteração
+	// preenchendo 0's e o ponto
+	if (i<=casasDec) {
+		while (i<casasDec) {
+			temp[i] = '0';
+			i++;
+		}
+
+		temp[i] = '.';
+		temp[i+1] = '0';
+		i+=2;
+	}
+
+	// Caso o número seja negativo, adicionar o caracter '-' na string
+	// invertida e inserir o término da string
 	if (isNegative) {
 		temp[i] = '-';
                 Serial.write(temp[i]);
@@ -660,9 +713,11 @@ void ConvertFloatToString(char string[], float value, char casasDec)
 		temp[i] = 0;
 		i--;
 	}
-        
-        Serial.write("\n");
-        
+    
+    Serial.write("\n");
+    
+    // Inverte a string auxiliar, escrevendo na string principal o 
+    // número correto
 	while (i >= 0) {
 		string[j] = temp[i];
                 Serial.write(string[j]);
@@ -670,3 +725,4 @@ void ConvertFloatToString(char string[], float value, char casasDec)
 	}
 	string[j] = 0;
 }
+
